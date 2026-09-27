@@ -1,0 +1,7 @@
+node_modules
+dist
+data
+.env
+*.log
+手机扫码.png
+test_image.jpg
