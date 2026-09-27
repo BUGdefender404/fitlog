@@ -136,14 +136,52 @@ export default function MePage(props: {
         <h2>安装到手机桌面</h2>
         {(() => {
           const env = envInfo();
+          const copyLink = () => {
+            navigator.clipboard?.writeText(location.href).then(
+              () => notify("网址已复制，去自带浏览器粘贴打开"),
+              () => notify("复制失败，请在地址栏手动复制网址")
+            );
+          };
+          const copyBtn = (
+            <button className="ghost-line" style={{ marginTop: 10, display: "block", width: "100%" }} onClick={copyLink}>
+              📋 复制本页网址，换浏览器打开
+            </button>
+          );
           if (env.standalone) return <p className="cf-note">✅ 当前已是 App 模式运行</p>;
           if (env.wechat)
             return <p className="cf-note">微信里无法添加桌面：点右上角「···」→「在浏览器打开」，然后在浏览器菜单里选「添加到主屏幕」</p>;
-          if (install.ready)
-            return <button className="primary" onClick={() => install.prompt()}>📲 一键安装 App</button>;
-          if (env.ios)
-            return <p className="cf-note">iOS Safari：点底部「分享」按钮 ⬆️ → 滑动选「添加到主屏幕」→ 确认添加</p>;
-          return <p className="cf-note">在浏览器菜单（右上角 ⋮）中选择「添加到主屏幕」或「安装应用」</p>;
+          if (env.ios && !env.safari)
+            return (
+              <div>
+                <p className="cf-note">
+                  你用的浏览器（夸克 / QQ 等）在 iPhone 上<b>没有「添加到主屏幕」功能</b>，只有自带的 Safari 可以：
+                  ① 点下方按钮复制网址 → ② 打开 Safari 粘贴访问 → ③ 点底部「分享」⬆️ → 选「添加到主屏幕」
+                </p>
+                {copyBtn}
+              </div>
+            );
+          if (env.ios && env.safari)
+            return <p className="cf-note">点底部「分享」按钮 ⬆️ → 滑动找到「添加到主屏幕」→ 确认添加（找不到可往下滚动列表）</p>;
+          if (install.ready) return <button className="primary" onClick={() => install.prompt()}>📲 一键安装 App</button>;
+          if (env.quark || env.qqbrowser)
+            return (
+              <div>
+                <p className="cf-note">
+                  夸克 / QQ 浏览器：点底部「☰」菜单，找<b>「添加书签」或「添加到桌面」</b>；若只有书签，可在书签处<b>长按 → 发送到桌面</b>。
+                  <br /><br />
+                  点了没反应？多数是手机拦截了：设置 → 应用管理 → 该浏览器 → 权限 → 允许<b>「桌面快捷方式」</b>，再回来重试。
+                  <br /><br />
+                  还不行就用 Chrome 或 Edge 打开（对 App 安装支持最好）：
+                </p>
+                {copyBtn}
+              </div>
+            );
+          return (
+            <div>
+              <p className="cf-note">在浏览器菜单里找「添加到主屏幕」或「安装应用」。若没有该选项，建议用 Chrome / Edge 打开本页：</p>
+              {copyBtn}
+            </div>
+          );
         })()}
       </section>
 

@@ -93,6 +93,12 @@ export function envInfo() {
     ios: /iPhone|iPad|iPod/i.test(ua) || (/Macintosh/.test(ua) && "ontouchend" in document),
     standalone: window.matchMedia("(display-mode: standalone)").matches || (navigator as any).standalone === true,
     android: /Android/i.test(ua),
+    // 国内第三方浏览器（iPhone 上均无「添加到主屏幕」能力；安卓的快捷方式入口和权限也各不相同）
+    quark: /Quark/i.test(ua),
+    qqbrowser: /MQQBrowser/i.test(ua),
+    safari:
+      /Safari/i.test(ua) &&
+      !/CriOS|FxiOS|EdgiOS|MQQBrowser|Quark|MicroMessenger|Baidu|UCBrowser|HeyTapBrowser|HuaweiBrowser|MiuiBrowser|OppoBrowser|VivoBrowser|Mercury/i.test(ua),
   };
 }
 
