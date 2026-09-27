@@ -15,7 +15,16 @@ export default function App({ store, needPin }: { store: Store; needPin: boolean
   const [pinOk, setPinOk] = useState(!needPin);
   const [toast, setToast] = useState("");
   const [addReq, setAddReq] = useState<{ date: string; meal: Meal }>({ date: fmtDate(new Date()), meal: defaultMeal() });
+  const [installEvt, setInstallEvt] = useState<any>(null);
   const toastTimer = useRef<number>(0);
+
+  useEffect(() => {
+    const h = (e: Event) => { e.preventDefault(); setInstallEvt(e); };
+    window.addEventListener("beforeinstallprompt", h);
+    window.addEventListener("appinstalled", () => { setInstallEvt(null); notify("轻食记已安装到桌面 🎉"); });
+    return () => window.removeEventListener("beforeinstallprompt", h);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const notify = useCallback((msg: string) => {
     setToast(msg);
@@ -67,7 +76,10 @@ export default function App({ store, needPin }: { store: Store; needPin: boolean
             notify={notify} onSaved={onSaved} />
         )}
         {tab === "stats" && <StatsPage store={store} version={version} />}
-        {tab === "me" && <MePage store={store} targets={targets} version={version} onTargetsChange={loadProfile} notify={notify} />}
+        {tab === "me" && (
+          <MePage store={store} targets={targets} version={version} onTargetsChange={loadProfile} notify={notify}
+            install={{ ready: !!installEvt, prompt: async () => { if (installEvt) { installEvt.prompt(); setInstallEvt(null); } } }} />
+        )}
       </main>
       <nav className="tabbar">
         <button className={tab === "today" ? "on" : ""} onClick={() => setTab("today")}><i>📋</i>今日</button>

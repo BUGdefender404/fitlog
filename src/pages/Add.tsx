@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
-  Food, Meal, MEALS, RecogItem, Store, addDays, compressImage, mealLabel,
+  Food, LIGHT_LABEL, Meal, MEALS, RecogItem, Store, addDays, compressImage, mealLabel, trafficLight,
 } from "../api";
 import { CustomFoodSheet, FoodPortionSheet } from "../components/sheets";
 
@@ -133,6 +133,8 @@ export default function AddPage(props: {
                 <div className="recog-item" key={i}>
                   <input className="ri-name" value={it.name} onChange={(e) => setItem(i, { name: e.target.value })} />
                   <div className="ri-row">
+                    <span className={`fdot ${trafficLight({ per100: it.per100.kcal, protein: it.per100.protein, fat: it.per100.fat }).level}`}
+                      title={LIGHT_LABEL[trafficLight({ per100: it.per100.kcal, protein: it.per100.protein, fat: it.per100.fat }).level]} />
                     <span className={`badge ${it.source === "db" ? "badge-db" : "badge-ai"}`}>{it.source === "db" ? "标准值" : "AI估算"}</span>
                     <span className="ri-grams">
                       <input type="number" value={it.grams} onChange={(e) => setItem(i, { grams: Number(e.target.value) || 0 })} /> g
@@ -172,21 +174,24 @@ export default function AddPage(props: {
             ))}
           </div>
           <ul className="food-list">
-            {shown.map((f) => (
-              <li key={f.id} onClick={() => setPortion(f)}>
-                <span className="fdot" />
-                <span className="fn">
-                  {f.name}
-                  <i>{f.category}</i>
-                  {!!f.logged && <span className="logged-badge">记录过</span>}
-                </span>
-                <span className="fk">
-                  <b className="fk-kcal">{f.per100}</b> 千卡/100克
-                  <button className={`star ${f.is_favorite ? "on" : ""}`}
-                    onClick={(ev) => { ev.stopPropagation(); toggleFav(f); }}>★</button>
-                </span>
-              </li>
-            ))}
+            {shown.map((f) => {
+              const lt = trafficLight(f);
+              return (
+                <li key={f.id} onClick={() => setPortion(f)}>
+                  <span className={`fdot ${lt.level}`} title={LIGHT_LABEL[lt.level] + " · " + lt.reason} />
+                  <span className="fn">
+                    {f.name}
+                    <i>{f.category}</i>
+                    {!!f.logged && <span className="logged-badge">记录过</span>}
+                  </span>
+                  <span className="fk">
+                    <b className="fk-kcal">{f.per100}</b> 千卡/100克
+                    <button className={`star ${f.is_favorite ? "on" : ""}`}
+                      onClick={(ev) => { ev.stopPropagation(); toggleFav(f); }}>★</button>
+                  </span>
+                </li>
+              );
+            })}
             {shown.length === 0 && q && <li className="noresult">没找到？<b onClick={() => setShowCustom(true)}>去自定义食物</b>，把包装上的配料表录进去</li>}
             {shown.length === 0 && !q && <li className="noresult">输入名称搜索食物库，或点上方「自定义食物」</li>}
           </ul>

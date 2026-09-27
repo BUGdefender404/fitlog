@@ -4,6 +4,7 @@ export type Per100 = { kcal: number; protein: number; carb: number; fat: number 
 export type Food = {
   id: number; name: string; category: string; aliases: string;
   per100: number; protein: number; carb: number; fat: number;
+  fiber?: number | null; sugar?: number | null;
   source: string; is_favorite: number; logged?: number;
 };
 export type RecogItem = {
@@ -49,6 +50,40 @@ export const EX_PRESETS = [
   { name: "瑜伽", met: 3.0 }, { name: "跳绳", met: 11.0 },
 ];
 export const WATER_GOAL = 1500;
+
+// ---------- 红黄绿减脂分级 ----------
+export type LightLevel = "green" | "yellow" | "red";
+export const LIGHT_LABEL: Record<LightLevel, string> = {
+  green: "绿灯 · 放心吃",
+  yellow: "黄灯 · 适量吃",
+  red: "红灯 · 少吃",
+};
+export function trafficLight(f: { category?: string; per100: number; protein: number; fat: number; fiber?: number | null; sugar?: number | null }): { level: LightLevel; reason: string } {
+  const isDrink = f.category === "饮品";
+  const kcal = Number(f.per100) || 0;
+  let lvl = isDrink
+    ? (kcal <= 20 ? 0 : kcal <= 50 ? 1 : 2)
+    : (kcal <= 100 ? 0 : kcal <= 250 ? 1 : 2);
+  const plus: string[] = [], minus: string[] = [];
+  if ((f.protein || 0) >= 15) { if (lvl > 0) lvl--; plus.push("高蛋白"); }
+  if ((f.fiber ?? 0) >= 3) { if (lvl > 0) lvl--; plus.push("膳食纤维丰富"); }
+  if ((f.fat || 0) >= 20 && f.category !== "坚果零食") { if (lvl < 2) lvl++; minus.push("脂肪较高"); }
+  if (isDrink && (f.sugar ?? 0) >= 8) { if (lvl < 2) lvl++; minus.push("含糖高"); }
+  const energy = isDrink ? "液体热量" : kcal <= 100 ? "能量密度低" : kcal <= 250 ? "能量中等" : "能量密度高";
+  const detail = [...plus, ...minus].join("、");
+  return { level: (["green", "yellow", "red"] as LightLevel[])[lvl], reason: detail ? `${energy} · ${detail}` : energy };
+}
+
+// ---------- 运行环境 ----------
+export function envInfo() {
+  const ua = navigator.userAgent;
+  return {
+    wechat: /MicroMessenger/i.test(ua),
+    ios: /iPhone|iPad|iPod/i.test(ua) || (/Macintosh/.test(ua) && "ontouchend" in document),
+    standalone: window.matchMedia("(display-mode: standalone)").matches || (navigator as any).standalone === true,
+    android: /Android/i.test(ua),
+  };
+}
 
 export function fmtDate(d: Date): string {
   const p = (n: number) => String(n).padStart(2, "0");
@@ -233,9 +268,9 @@ export class ServerStore implements Store {
 
 // ---------- 本地模式（IndexedDB，部署在 GitHub Pages 时使用） ----------
 import seedRows from "../foods.json";
-type SeedRow = [string, string, number, number, number, number, string];
-const SEED_FOODS: Food[] = (seedRows as SeedRow[]).map(([name, category, per100, protein, carb, fat, aliases], i) => ({
-  id: i + 1, name, category, aliases, per100, protein, carb, fat, source: "cfct", is_favorite: 0,
+type SeedRow = [string, string, number, number, number, number, number | null, number | null, string];
+const SEED_FOODS: Food[] = (seedRows as SeedRow[]).map(([name, category, per100, protein, carb, fat, fiber, sugar, aliases], i) => ({
+  id: i + 1, name, category, aliases, per100, protein, carb, fat, fiber, sugar, source: "cfct", is_favorite: 0,
 }));
 
 type LocalState = {
@@ -386,7 +421,7 @@ export class LocalStore implements Store {
     this.state.customFoods.push({
       id: 1000 + this.state.nextFoodId++, name: f.name.trim(), category: f.category || "自定义",
       aliases: f.aliases || "", per100: r1(f.per100.kcal), protein: r1(f.per100.protein),
-      carb: r1(f.per100.carb), fat: r1(f.per100.fat), source: "custom", is_favorite: 0,
+      carb: r1(f.per100.carb), fat: r1(f.per100.fat), fiber: null, sugar: null, source: "custom", is_favorite: 0,
     });
     await this.saveState();
   }

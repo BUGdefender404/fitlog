@@ -139,7 +139,19 @@ input, select { font-family: inherit; }
 .food-list { list-style: none; max-height: 430px; overflow-y: auto; }
 .food-list li { display: flex; align-items: center; gap: 8px; padding: 11px 2px; border-bottom: 1px solid var(--line); cursor: pointer; }
 .food-list li:last-child { border-bottom: none; }
-.fdot { width: 8px; height: 8px; border-radius: 50%; background: var(--accent); flex: none; }
+.fdot { width: 8px; height: 8px; border-radius: 50%; flex: none; }
+.fdot.green { background: var(--accent); }
+.fdot.yellow { background: #fbbf24; }
+.fdot.red { background: var(--red); }
+.light-line { display: flex; align-items: center; gap: 7px; font-size: 13px; font-weight: 600; margin-top: 8px; }
+.light-line i { font-style: normal; font-weight: 400; color: var(--muted); font-size: 12px; }
+.light-line .light-dot { width: 10px; height: 10px; border-radius: 50%; flex: none; }
+.light-line.green { color: var(--accent-dark); }
+.light-line.green .light-dot { background: var(--accent); }
+.light-line.yellow { color: #b45309; }
+.light-line.yellow .light-dot { background: #fbbf24; }
+.light-line.red { color: var(--red); }
+.light-line.red .light-dot { background: var(--red); }
 .food-list .fn { flex: 1; font-size: 14px; min-width: 0; display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
 .food-list .fn i { font-style: normal; font-size: 11px; color: var(--muted); }
 .logged-badge { font-size: 10px; background: #dbeafe; color: #1d4ed8; border-radius: 7px; padding: 1px 6px; }

@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { compressImage, computeItem, Entry, EX_PRESETS, Food, Meal, Per100, Store } from "../api";
+import { compressImage, computeItem, Entry, EX_PRESETS, Food, LIGHT_LABEL, Meal, Per100, Store, trafficLight } from "../api";
 
 // ---------------- 底部弹层 ----------------
 export function BottomSheet({ children, onClose }: { children: any; onClose: () => void }) {
@@ -29,6 +29,12 @@ export function FoodPortionSheet(props: {
       : { name: food!.name, per100: { kcal: food!.per100, protein: food!.protein, carb: food!.carb, fat: food!.fat } };
   const cur = computeItem(base.name, grams || 0, base.per100, "db", null);
   const kJ = Math.round(cur.kcal * 4.184);
+  const light = trafficLight({
+    category: mode === "add" ? food!.category : undefined,
+    per100: base.per100.kcal, protein: base.per100.protein, fat: base.per100.fat,
+    fiber: mode === "add" ? food!.fiber : undefined,
+    sugar: mode === "add" ? food!.sugar : undefined,
+  });
   const setG = (v: number) => setGrams(Math.max(0, Math.min(3000, Math.round(v))));
   const save = async () => {
     if (!(grams > 0)) return;
@@ -52,6 +58,11 @@ export function FoodPortionSheet(props: {
       <div className="ps-head">
         <b>{base.name}</b>
         {mode === "edit" && <span className={`badge ${entry!.source === "db" ? "badge-db" : "badge-ai"}`}>{entry!.source === "db" ? "标准值" : "AI估算"}</span>}
+      </div>
+      <div className={`light-line ${light.level}`}>
+        <span className="light-dot" />
+        {LIGHT_LABEL[light.level]}
+        <i>{light.reason}</i>
       </div>
       <div className="ps-kcal">
         <b>{cur.kcal}<i> / {kJ}</i></b>

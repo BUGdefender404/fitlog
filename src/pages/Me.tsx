@@ -1,11 +1,12 @@
 import { useEffect, useRef, useState } from "react";
-import { Store, Targets, fmtDate, getApiKey, setApiKey } from "../api";
+import { envInfo, Store, Targets, fmtDate, getApiKey, setApiKey } from "../api";
 
 export default function MePage(props: {
   store: Store; targets: Targets | null; version: number;
   onTargetsChange: () => void; notify: (m: string) => void;
+  install: { ready: boolean; prompt: () => Promise<void> };
 }) {
-  const { store, targets, onTargetsChange, notify } = props;
+  const { store, targets, onTargetsChange, notify, install } = props;
   const [f, setF] = useState({ sex: "male", age: "", height: "", weight: "", activity: "mid", deficit: 300, auto: true, target_kcal: "" });
   const [result, setResult] = useState<Targets | null>(targets);
   const [loaded, setLoaded] = useState(false);
@@ -132,6 +133,21 @@ export default function MePage(props: {
       </section>
 
       <section className="card">
+        <h2>安装到手机桌面</h2>
+        {(() => {
+          const env = envInfo();
+          if (env.standalone) return <p className="cf-note">✅ 当前已是 App 模式运行</p>;
+          if (env.wechat)
+            return <p className="cf-note">微信里无法添加桌面：点右上角「···」→「在浏览器打开」，然后在浏览器菜单里选「添加到主屏幕」</p>;
+          if (install.ready)
+            return <button className="primary" onClick={() => install.prompt()}>📲 一键安装 App</button>;
+          if (env.ios)
+            return <p className="cf-note">iOS Safari：点底部「分享」按钮 ⬆️ → 滑动选「添加到主屏幕」→ 确认添加</p>;
+          return <p className="cf-note">在浏览器菜单（右上角 ⋮）中选择「添加到主屏幕」或「安装应用」</p>;
+        })()}
+      </section>
+
+      <section className="card">
         <h2>今日体重</h2>
         <div className="weight-row">
           <input type="number" inputMode="decimal" placeholder="如 72.5" value={todayW} onChange={(e) => setTodayW(e.target.value)} />
@@ -169,7 +185,7 @@ export default function MePage(props: {
 
       <section className="card about">
         <h2>关于</h2>
-        <p>轻食记 v1.0 · 食物营养数据参考《中国食物成分表》，AI 识别由智谱 GLM-4V-Flash（免费档）提供。标准值可信，AI 估算仅供参考，份量可在记录后随时修改。</p>
+        <p>轻食记 v1.1 · 食物营养数据参考《中国食物成分表》及中国营养学会营养健康查询平台（nlc.chinanutri.cn）、NutriData 营养数据库（nutridata.cn）。红黄绿分级按能量密度、蛋白质、膳食纤维、脂肪、糖综合判定。AI 识别由智谱 GLM-4V-Flash（免费档）提供，估算值仅供参考。</p>
       </section>
     </div>
   );

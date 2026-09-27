@@ -33,6 +33,8 @@ CREATE TABLE IF NOT EXISTS foods (
   protein REAL NOT NULL,
   carb REAL NOT NULL,
   fat REAL NOT NULL,
+  fiber REAL,
+  sugar REAL,
   source TEXT DEFAULT 'cfct',
   is_favorite INTEGER DEFAULT 0,
   created_at TEXT DEFAULT (datetime('now','localtime'))
@@ -83,12 +85,28 @@ CREATE TABLE IF NOT EXISTS water (
   ml INTEGER DEFAULT 0
 );
 `);
+// 迁移：为存量库补充 膳食纤维/糖 字段
+const foodCols = db.prepare("PRAGMA table_info(foods)").all().map((c) => c.name);
+if (!foodCols.includes("fiber")) db.exec("ALTER TABLE foods ADD COLUMN fiber REAL");
+if (!foodCols.includes("sugar")) db.exec("ALTER TABLE foods ADD COLUMN sugar REAL");
+
+const seed = JSON.parse(readFileSync(path.join(process.cwd(), "foods.json"), "utf8"));
 if (!db.prepare("SELECT COUNT(*) AS c FROM foods").get().c) {
-  const seed = JSON.parse(readFileSync(path.join(process.cwd(), "foods.json"), "utf8"));
-  const ins = db.prepare("INSERT INTO foods (name, category, per100, protein, carb, fat, aliases) VALUES (?,?,?,?,?,?,?)");
-  for (const [name, cat, per100, protein, carb, fat, aliases] of seed)
-    ins.run(name, cat, per100, protein, carb, fat, aliases);
+  const ins = db.prepare(
+    "INSERT INTO foods (name, category, per100, protein, carb, fat, aliases, fiber, sugar) VALUES (?,?,?,?,?,?,?,?,?)"
+  );
+  for (const [name, cat, per100, protein, carb, fat, fiber, sugar, aliases] of seed)
+    ins.run(name, cat, per100, protein, carb, fat, aliases, fiber, sugar);
   console.log(`食物库已导入 ${seed.length} 条`);
+} else {
+  // 按《中国食物成分表》刷新种子数据（含新增纤维/糖维度），自定义食物不受影响
+  const upd = db.prepare(
+    "UPDATE foods SET category=?, per100=?, protein=?, carb=?, fat=?, aliases=?, fiber=?, sugar=? WHERE name=? AND source='cfct'"
+  );
+  let n = 0;
+  for (const [name, cat, per100, protein, carb, fat, fiber, sugar, aliases] of seed)
+    n += upd.run(cat, per100, protein, carb, fat, aliases, fiber, sugar, name).changes;
+  console.log(`食物库已刷新 ${n} 条种子数据`);
 }
 
 // ---------- 工具 ----------
