@@ -11,6 +11,7 @@
   },
   "dependencies": {
     "@hono/node-server": "^1.13.0",
+    "@zxing/library": "^0.23.0",
     "hono": "^4.6.0",
     "qrcode": "^1.5.4",
     "react": "^18.3.1",

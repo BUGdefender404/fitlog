@@ -2,7 +2,8 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import {
   Food, LIGHT_LABEL, Meal, MEALS, RecogItem, Store, addDays, compressImage, mealLabel, trafficLight,
 } from "../api";
-import { CustomFoodSheet, FoodPortionSheet } from "../components/sheets";
+import { OffHit, offSearch } from "../off";
+import { CustomFoodSheet, FoodPortionSheet, OffLightDot, ScanSheet } from "../components/sheets";
 
 export default function AddPage(props: {
   store: Store; date: string; meal: Meal; notify: (m: string) => void; onSaved: (msg: string) => void;
@@ -22,8 +23,14 @@ export default function AddPage(props: {
   const [cat, setCat] = useState("全部");
   const [portion, setPortion] = useState<Food | null>(null);
   const [showCustom, setShowCustom] = useState(false);
+  const [showScan, setShowScan] = useState(false);
+  // Open Food Facts 全球库兜底
+  const [offHits, setOffHits] = useState<OffHit[] | null>(null);
+  const [offBusy, setOffBusy] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
   const searchTimer = useRef<number>(0);
+  const offTimer = useRef<number>(0);
+  const offAbort = useRef<AbortController | null>(null);
 
   useEffect(() => { store.searchFoods("").then((all) => setFavorites(all.filter((f) => f.is_favorite))).catch(() => {}); }, [store]);
 
@@ -35,6 +42,41 @@ export default function AddPage(props: {
     searchTimer.current = window.setTimeout(() => loadResults(q.trim()), q.trim() ? 300 : 0);
     return () => window.clearTimeout(searchTimer.current);
   }, [q, loadResults]);
+
+  const runOffSearch = useCallback(async (query: string) => {
+    offAbort.current?.abort();
+    const ac = new AbortController();
+    offAbort.current = ac;
+    setOffBusy(true);
+    try {
+      setOffHits(await offSearch(query, ac.signal));
+    } catch (e: any) {
+      if (e?.name !== "AbortError") { setOffHits([]); notify("全球库暂时连不上，稍后再试"); }
+    } finally {
+      if (!ac.signal.aborted) setOffBusy(false);
+    }
+  }, [notify]);
+  // 本地库几乎搜不到时，自动兜底查全球库
+  useEffect(() => {
+    const query = q.trim();
+    window.clearTimeout(offTimer.current);
+    if (query.length < 2 || results.length > 0) { setOffHits(null); setOffBusy(false); return; }
+    offTimer.current = window.setTimeout(() => runOffSearch(query), 700);
+    return () => window.clearTimeout(offTimer.current);
+  }, [q, results, runOffSearch]);
+
+  // 全球库条目 → 存入食物库（含 Nutri-Score 红黄绿）→ 直接选份量
+  const saveOff = async (hit: OffHit) => {
+    try {
+      const name = hit.brand && !hit.name.includes(hit.brand) ? `${hit.name}（${hit.brand}）` : hit.name;
+      const f = await store.addCustomFood({
+        name, category: hit.category, per100: hit.per100,
+        fiber: hit.fiber, sugar: hit.sugar, off_grade: hit.nutriscore,
+      });
+      setOffHits(null); setQ("");
+      setPortion(f);
+    } catch (e: any) { notify(e.message || "保存失败"); }
+  };
 
   const onPick = async (file?: File | null) => {
     if (!file) return;
@@ -119,10 +161,16 @@ export default function AddPage(props: {
         <section className="card">
           <input ref={fileRef} type="file" accept="image/*" capture="environment" hidden onChange={(e) => onPick(e.target.files?.[0])} />
           {!preview && !busy && (
-            <button className="photo-btn" onClick={() => fileRef.current?.click()}>
-              <b>📷 拍下你的食物</b>
-              <span>或点击从相册选择 · 支持一餐多菜</span>
-            </button>
+            <>
+              <button className="photo-btn" onClick={() => fileRef.current?.click()}>
+                <b>📷 拍下你的食物</b>
+                <span>或点击从相册选择 · 支持一餐多菜</span>
+              </button>
+              <button className="photo-btn small" onClick={() => setShowScan(true)}>
+                <b>🔍 扫条码秒查包装食品</b>
+                <span>零食饮料等有条码的，比拍照更准</span>
+              </button>
+            </>
           )}
           {busy && <div className="loading">AI 正在识别中…（约 3~8 秒）</div>}
           {preview && <img className="preview" src={preview} />}
@@ -192,7 +240,29 @@ export default function AddPage(props: {
                 </li>
               );
             })}
-            {shown.length === 0 && q && <li className="noresult">没找到？<b onClick={() => setShowCustom(true)}>去自定义食物</b>，把包装上的配料表录进去</li>}
+            {q.trim() && offBusy && <li className="noresult">🌐 正在全球开源食物库搜索「{q.trim()}」…</li>}
+            {offHits && (
+              <>
+                {offHits.length > 0 && <li className="off-head">来自 Open Food Facts 全球开源食物库（点一下存入并记录）</li>}
+                {offHits.map((h, i) => (
+                  <li key={"off" + i} onClick={() => saveOff(h)}>
+                    <OffLightDot hit={h} />
+                    <span className="fn">
+                      {h.name}{h.brand && <i> · {h.brand}</i>}
+                      <span className="logged-badge off-badge">全球库</span>
+                    </span>
+                    <span className="fk">
+                      <b className="fk-kcal">{h.per100.kcal}</b> 千卡/100{h.category === "饮品" ? "毫升" : "克"}
+                    </span>
+                  </li>
+                ))}
+                {offHits.length === 0 && <li className="noresult">全球库也没找到「{q.trim()}」，<b onClick={() => setShowCustom(true)}>去自定义食物</b>，把包装上的配料表录进去</li>}
+              </>
+            )}
+            {q.trim() && !offBusy && offHits === null && shown.length > 0 && shown.length <= 2 && (
+              <li className="noresult off-more" onClick={() => runOffSearch(q.trim())}>🌐 没找到想要的？在全球开源食物库搜「{q.trim()}」</li>
+            )}
+            {shown.length === 0 && q && !offBusy && !offHits && <li className="noresult">本地库没找到，正在帮你查全球库…</li>}
             {shown.length === 0 && !q && <li className="noresult">输入名称搜索食物库，或点上方「自定义食物」</li>}
           </ul>
         </section>
@@ -206,6 +276,10 @@ export default function AddPage(props: {
       {showCustom && (
         <CustomFoodSheet store={store} notify={notify} onClose={() => setShowCustom(false)}
           onSaved={async () => { setShowCustom(false); notify("自定义食物已保存"); await loadResults(q.trim()); await starFav(); }} />
+      )}
+      {showScan && (
+        <ScanSheet notify={notify} onClose={() => setShowScan(false)}
+          onPick={(h) => { setShowScan(false); saveOff(h); }} />
       )}
     </div>
   );

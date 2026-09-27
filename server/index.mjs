@@ -35,6 +35,7 @@ CREATE TABLE IF NOT EXISTS foods (
   fat REAL NOT NULL,
   fiber REAL,
   sugar REAL,
+  off_grade TEXT,
   source TEXT DEFAULT 'cfct',
   is_favorite INTEGER DEFAULT 0,
   created_at TEXT DEFAULT (datetime('now','localtime'))
@@ -85,10 +86,11 @@ CREATE TABLE IF NOT EXISTS water (
   ml INTEGER DEFAULT 0
 );
 `);
-// 迁移：为存量库补充 膳食纤维/糖 字段
+// 迁移：为存量库补充 膳食纤维/糖/Nutri-Score 字段
 const foodCols = db.prepare("PRAGMA table_info(foods)").all().map((c) => c.name);
 if (!foodCols.includes("fiber")) db.exec("ALTER TABLE foods ADD COLUMN fiber REAL");
 if (!foodCols.includes("sugar")) db.exec("ALTER TABLE foods ADD COLUMN sugar REAL");
+if (!foodCols.includes("off_grade")) db.exec("ALTER TABLE foods ADD COLUMN off_grade TEXT");
 
 const seed = JSON.parse(readFileSync(path.join(process.cwd(), "foods.json"), "utf8"));
 if (!db.prepare("SELECT COUNT(*) AS c FROM foods").get().c) {
@@ -407,18 +409,24 @@ app.get("/api/foods", (c) => {
   return c.json(list.slice(0, 40));
 });
 
-// 自定义食物（用户按包装配料表录入，per100 由前端换算好传入）
+// 自定义食物（用户按包装配料表录入 / 扫条码从 Open Food Facts 导入，per100 由前端换算好传入）
+// 去重规则与手机本地模式一致：完全同名才拦截；带品牌后缀的条码商品视为不同条目
 app.post("/api/foods", async (c) => {
   const b = await c.req.json();
   if (!b.name || !normalize(b.name)) return c.json({ error: "名称必填" }, 400);
-  const dup = matchFood(b.name);
-  if (dup && dup.source === "cfct") return c.json({ error: `食物库已有「${dup.name}」` }, 409);
+  const nname = normalize(b.name);
+  const exact = getFoods().find((f) => f.norm === nname);
+  if (exact && exact.source === "cfct") return c.json({ error: `食物库已有「${exact.name}」` }, 409);
+  if (exact) return c.json({ id: exact.id, food: exact }); // 已录过，直接复用
   const r = db.prepare(
-    "INSERT INTO foods (name, category, per100, protein, carb, fat, aliases, source) VALUES (?,?,?,?,?,?,?,'custom')"
+    "INSERT INTO foods (name, category, per100, protein, carb, fat, aliases, fiber, sugar, off_grade, source) VALUES (?,?,?,?,?,?,?,?,?,?, 'custom')"
   ).run(String(b.name).trim(), String(b.category || "自定义"), Number(b.per100?.kcal) || 0,
-    Number(b.per100?.protein) || 0, Number(b.per100?.carb) || 0, Number(b.per100?.fat) || 0, String(b.aliases || ""));
+    Number(b.per100?.protein) || 0, Number(b.per100?.carb) || 0, Number(b.per100?.fat) || 0,
+    String(b.aliases || ""), b.fiber == null ? null : Number(b.fiber), b.sugar == null ? null : Number(b.sugar),
+    b.off_grade ? String(b.off_grade) : null);
   invalidateFoods();
-  return c.json({ id: Number(r.lastInsertRowid) });
+  const food = getFoods().find((f) => f.id === Number(r.lastInsertRowid));
+  return c.json({ id: Number(r.lastInsertRowid), food });
 });
 
 // 收藏/取消收藏

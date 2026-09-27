@@ -262,3 +262,22 @@ input, select { font-family: inherit; }
 
 /* toast */
 .toast { position: fixed; bottom: 96px; left: 50%; transform: translateX(-50%); background: rgba(26,29,33,.88); color: #fff; padding: 9px 18px; border-radius: 20px; font-size: 13px; z-index: 40; max-width: 80vw; }
+
+/* 扫条码 + Open Food Facts 全球库 */
+.scan-box { border-radius: 14px; overflow: hidden; background: #101317; aspect-ratio: 4 / 3; display: flex; align-items: center; justify-content: center; }
+.scan-box video { width: 100%; height: 100%; object-fit: cover; }
+.scan-err { color: #cfd6dd; font-size: 13px; text-align: center; padding: 20px; line-height: 1.7; }
+.scan-manual { display: flex; gap: 8px; margin-top: 12px; }
+.scan-manual input { flex: 1; border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; font-size: 15px; outline: none; }
+.scan-manual input:focus { border-color: var(--accent); }
+.scan-manual button { border: none; border-radius: 10px; background: var(--accent); color: #fff; font-size: 14px; font-weight: 600; padding: 0 20px; }
+.scan-manual button:disabled { opacity: .5; }
+.scan-result .sr-name { display: flex; align-items: center; gap: 8px; font-size: 16px; flex-wrap: wrap; }
+.scan-result .sr-name i { color: var(--muted); font-style: normal; font-size: 13px; }
+.scan-result .sr-kcal { margin-top: 10px; color: var(--muted); font-size: 13px; }
+.scan-result .sr-kcal b { font-size: 26px; color: var(--text); margin-right: 4px; }
+.scan-result .sr-kcal i { font-style: normal; }
+.scan-result .ri-macro { margin-top: 6px; }
+.off-head { color: var(--muted); font-size: 11px; justify-content: center; cursor: default; }
+.off-badge { background: #dcfce7; color: #15803d; }
+.food-list .noresult.off-more b, .food-list .noresult.off-more { cursor: pointer; color: var(--accent-dark); }

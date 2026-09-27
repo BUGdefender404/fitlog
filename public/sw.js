@@ -1,5 +1,5 @@
 // 轻食记 Service Worker：页面导航网络优先（保证更新及时），静态资源缓存优先；API 与智谱请求不走缓存
-const CACHE = "fitlog-static-v2";
+const CACHE = "fitlog-static-v3";
 self.addEventListener("install", (e) => {
   e.waitUntil(caches.open(CACHE).then((c) => c.addAll(["./", "./index.html"])).then(() => self.skipWaiting()));
 });

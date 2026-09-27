@@ -185,7 +185,7 @@ export default function MePage(props: {
 
       <section className="card about">
         <h2>关于</h2>
-        <p>轻食记 v1.1 · 食物营养数据参考《中国食物成分表》及中国营养学会营养健康查询平台（nlc.chinanutri.cn）、NutriData 营养数据库（nutridata.cn）。红黄绿分级按能量密度、蛋白质、膳食纤维、脂肪、糖综合判定。AI 识别由智谱 GLM-4V-Flash（免费档）提供，估算值仅供参考。</p>
+        <p>轻食记 v1.2 · 食物营养数据参考《中国食物成分表》及中国营养学会营养健康查询平台（nlc.chinanutri.cn）、NutriData 营养数据库（nutridata.cn）；包装食品条码数据来自 Open Food Facts 全球开源食物库（world.openfoodfacts.org，ODbL 开放协议，Nutri-Score 分级映射红黄绿灯）。红黄绿分级按能量密度、蛋白质、膳食纤维、脂肪、糖综合判定。AI 识别由智谱 GLM-4V-Flash（免费档）提供，估算值仅供参考。</p>
       </section>
     </div>
   );

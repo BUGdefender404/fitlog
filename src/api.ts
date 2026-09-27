@@ -5,6 +5,7 @@ export type Food = {
   id: number; name: string; category: string; aliases: string;
   per100: number; protein: number; carb: number; fat: number;
   fiber?: number | null; sugar?: number | null;
+  off_grade?: string | null;
   source: string; is_favorite: number; logged?: number;
 };
 export type RecogItem = {
@@ -58,7 +59,17 @@ export const LIGHT_LABEL: Record<LightLevel, string> = {
   yellow: "黄灯 · 适量吃",
   red: "红灯 · 少吃",
 };
-export function trafficLight(f: { category?: string; per100: number; protein: number; fat: number; fiber?: number | null; sugar?: number | null }): { level: LightLevel; reason: string } {
+// Nutri-Score(a~e，Open Food Facts 官方分级) → 红黄绿
+const NS_LABEL: Record<string, string> = { a: "营养分级 A（最优）", b: "营养分级 B", c: "营养分级 C", d: "营养分级 D", e: "营养分级 E（最差）" };
+export function nutriLight(grade: string | null | undefined): LightLevel | null {
+  if (grade === "a" || grade === "b") return "green";
+  if (grade === "c") return "yellow";
+  if (grade === "d" || grade === "e") return "red";
+  return null;
+}
+export function trafficLight(f: { category?: string; per100: number; protein: number; fat: number; fiber?: number | null; sugar?: number | null; off_grade?: string | null }): { level: LightLevel; reason: string } {
+  const ns = nutriLight(f.off_grade);
+  if (ns) return { level: ns, reason: NS_LABEL[f.off_grade!] + " · Open Food Facts" };
   const isDrink = f.category === "饮品";
   const kcal = Number(f.per100) || 0;
   let lvl = isDrink
@@ -209,7 +220,7 @@ export interface Store {
   patchEntry(date: string, id: number, grams: number): Promise<void>;
   copyMeal(from: string, to: string, meal: Meal): Promise<number>;
   searchFoods(q: string): Promise<Food[]>;
-  addCustomFood(f: { name: string; category: string; per100: Per100; aliases?: string }): Promise<void>;
+  addCustomFood(f: { name: string; category: string; per100: Per100; aliases?: string; fiber?: number | null; sugar?: number | null; off_grade?: string | null }): Promise<Food>;
   toggleFavorite(id: number): Promise<void>;
   getProfile(): Promise<Profile>;
   saveProfile(p: { sex?: string; age?: number; height?: number; weight?: number; activity?: string; deficit?: number; auto?: boolean; target_kcal?: number; date?: string }): Promise<Targets>;
@@ -249,7 +260,10 @@ export class ServerStore implements Store {
     return r.count;
   }
   async searchFoods(q: string) { return this.http<Food[]>(`/api/foods?q=${encodeURIComponent(q)}`); }
-  async addCustomFood(f: { name: string; category: string; per100: Per100; aliases?: string }) { await this.http("/api/foods", { method: "POST", body: JSON.stringify(f) }); }
+  async addCustomFood(f: { name: string; category: string; per100: Per100; aliases?: string; fiber?: number | null; sugar?: number | null; off_grade?: string | null }) {
+    const r = await this.http<{ food: Food }>("/api/foods", { method: "POST", body: JSON.stringify(f) });
+    return r.food;
+  }
   async toggleFavorite(id: number) { await this.http(`/api/foods/${id}/favorite`, { method: "POST" }); }
   getProfile() { return this.http<{ profile: Profile }>("/api/profile").then((r) => r.profile); }
   async saveProfile(p: Parameters<Store["saveProfile"]>[0]) { const r = await this.http<{ targets: Targets }>("/api/profile", { method: "POST", body: JSON.stringify(p) }); return r.targets; }
@@ -414,16 +428,20 @@ export class LocalStore implements Store {
       .slice(0, 40)
       .map((x) => x.f);
   }
-  async addCustomFood(f: { name: string; category: string; per100: Per100; aliases?: string }): Promise<void> {
+  async addCustomFood(f: { name: string; category: string; per100: Per100; aliases?: string; fiber?: number | null; sugar?: number | null; off_grade?: string | null }): Promise<Food> {
     const all = this.allFoods();
     const dup = all.find((x) => scoreFood(x, f.name) >= 100);
     if (dup && dup.source === "cfct") throw new Error(`食物库已有「${dup.name}」`);
-    this.state.customFoods.push({
+    if (dup) return dup; // 已录过（自定义/全球库），直接复用避免重复
+    const row: Food = {
       id: 1000 + this.state.nextFoodId++, name: f.name.trim(), category: f.category || "自定义",
       aliases: f.aliases || "", per100: r1(f.per100.kcal), protein: r1(f.per100.protein),
-      carb: r1(f.per100.carb), fat: r1(f.per100.fat), fiber: null, sugar: null, source: "custom", is_favorite: 0,
-    });
+      carb: r1(f.per100.carb), fat: r1(f.per100.fat), fiber: f.fiber ?? null, sugar: f.sugar ?? null,
+      off_grade: f.off_grade ?? null, source: "custom", is_favorite: 0,
+    };
+    this.state.customFoods.push(row);
     await this.saveState();
+    return row;
   }
   async toggleFavorite(id: number): Promise<void> {
     const i = this.state.favIds.indexOf(id);

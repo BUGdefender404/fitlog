@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { compressImage, computeItem, Entry, EX_PRESETS, Food, LIGHT_LABEL, Meal, Per100, Store, trafficLight } from "../api";
+import { OffHit, offProduct } from "../off";
 
 // ---------------- 底部弹层 ----------------
 export function BottomSheet({ children, onClose }: { children: any; onClose: () => void }) {
@@ -34,6 +35,7 @@ export function FoodPortionSheet(props: {
     per100: base.per100.kcal, protein: base.per100.protein, fat: base.per100.fat,
     fiber: mode === "add" ? food!.fiber : undefined,
     sugar: mode === "add" ? food!.sugar : undefined,
+    off_grade: mode === "add" ? food!.off_grade : undefined,
   });
   const setG = (v: number) => setGrams(Math.max(0, Math.min(3000, Math.round(v))));
   const save = async () => {
@@ -176,6 +178,112 @@ export function CustomFoodSheet(props: { store: Store; notify: (m: string) => vo
       </div>
       <p className="cf-note">能量换算：包装上若是 1824 千焦 ≈ 436 千卡。填 kJ 即可，App 自动换算。</p>
       <button className="primary" disabled={busy} onClick={save}>保存到食物库</button>
+    </BottomSheet>
+  );
+}
+
+// ---------------- 扫条码查全球库（Open Food Facts） ----------------
+export function OffLightDot(props: { hit: OffHit }) {
+  const lt = trafficLight({
+    category: props.hit.category, per100: props.hit.per100.kcal, protein: props.hit.per100.protein,
+    fat: props.hit.per100.fat, fiber: props.hit.fiber, sugar: props.hit.sugar, off_grade: props.hit.nutriscore,
+  });
+  return <span className={`fdot ${lt.level}`} title={LIGHT_LABEL[lt.level] + " · " + lt.reason} />;
+}
+
+export function ScanSheet(props: { notify: (m: string) => void; onClose: () => void; onPick: (hit: OffHit) => void }) {
+  const { notify, onClose, onPick } = props;
+  const [phase, setPhase] = useState<"cam" | "hit">("cam");
+  const [hit, setHit] = useState<OffHit | null>(null);
+  const [manual, setManual] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [camErr, setCamErr] = useState("");
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const stopRef = useRef<() => void>(() => {});
+  const busyRef = useRef(false);
+
+  const lookup = async (code: string) => {
+    const c = code.trim();
+    if (!c || busyRef.current) return;
+    busyRef.current = true; setBusy(true);
+    try {
+      const h = await offProduct(c);
+      if (h) { stopRef.current(); setHit(h); setPhase("hit"); }
+      else notify(`全球库里没有条码 ${c}，可改用「拍营养成分表」录入`);
+    } catch (e: any) { notify(e.message || "查询失败"); }
+    finally { busyRef.current = false; setBusy(false); }
+  };
+
+  useEffect(() => {
+    let dead = false;
+    (async () => {
+      try {
+        if (!navigator.mediaDevices?.getUserMedia) throw new Error("需要 HTTPS 或本地环境才能开相机");
+        const video = videoRef.current;
+        if (!video) return;
+        if ("BarcodeDetector" in window) {
+          const det = new (window as any).BarcodeDetector({ formats: ["ean_13", "ean_8", "upc_a", "upc_e", "code_128"] });
+          const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } });
+          if (dead) { stream.getTracks().forEach((t) => t.stop()); return; }
+          video.srcObject = stream;
+          await video.play().catch(() => {});
+          const timer = window.setInterval(async () => {
+            if (busyRef.current || video.readyState < 2) return;
+            busyRef.current = true;
+            try {
+              const codes = await det.detect(video);
+              busyRef.current = false;
+              if (codes.length) await lookup(codes[0].rawValue);
+            } catch { busyRef.current = false; }
+          }, 450);
+          stopRef.current = () => { window.clearInterval(timer); stream.getTracks().forEach((t) => t.stop()); };
+        } else {
+          // iOS Safari 等无 BarcodeDetector 的环境：动态加载 zxing 兜底
+          const { BrowserMultiFormatReader } = await import("@zxing/library");
+          if (dead) return;
+          const reader = new BrowserMultiFormatReader();
+          await reader.decodeFromConstraints({ audio: false, video: { facingMode: "environment" } }, video, (result) => {
+            if (result) lookup(result.getText());
+          });
+          stopRef.current = () => reader.reset();
+        }
+      } catch (e: any) {
+        setCamErr(e?.message || "相机打开失败");
+      }
+    })();
+    return () => { dead = true; stopRef.current(); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  return (
+    <BottomSheet onClose={onClose}>
+      <div className="ps-head"><b>扫条码 · 查包装食品</b><span className="muted">Open Food Facts 全球库</span></div>
+      {phase === "cam" && (
+        <>
+          <div className="scan-box">
+            {camErr ? <div className="scan-err">📷 {camErr}<br />可直接输入包装上的条码数字</div> : <video ref={videoRef} playsInline muted />}
+          </div>
+          <div className="scan-manual">
+            <input inputMode="numeric" placeholder="或手动输入条码数字" value={manual}
+              onChange={(e) => setManual(e.target.value.replace(/\D/g, ""))}
+              onKeyDown={(e) => e.key === "Enter" && lookup(manual)} />
+            <button disabled={busy || !manual} onClick={() => lookup(manual)}>查询</button>
+          </div>
+          {busy && <div className="loading">全球库查询中…</div>}
+          <p className="cf-note">数据来自 Open Food Facts 开源数据库（ world.openfoodfacts.org ），包装食品建议以实物营养成分表为准。</p>
+        </>
+      )}
+      {phase === "hit" && hit && (
+        <div className="scan-result">
+          <div className="sr-name"><OffLightDot hit={hit} /><b>{hit.name}</b>{hit.brand && <i> · {hit.brand}</i>}</div>
+          <div className="sr-kcal"><b>{hit.per100.kcal}</b> 千卡/100{hit.category === "饮品" ? "毫升" : "克"}{hit.serving && <i>（每份 {hit.serving}）</i>}</div>
+          <div className="ri-macro">蛋白 {hit.per100.protein}g · 碳水 {hit.per100.carb}g · 脂肪 {hit.per100.fat}g{hit.sugar != null && ` · 糖 ${hit.sugar}g`}</div>
+          <div className="ps-btns">
+            <button onClick={onClose}>取消</button>
+            <button className="primary" onClick={() => onPick(hit)}>记录到餐单</button>
+          </div>
+        </div>
+      )}
     </BottomSheet>
   );
 }
