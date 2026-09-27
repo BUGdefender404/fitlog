@@ -3,7 +3,8 @@ import { Hono } from "hono";
 import { serve } from "@hono/node-server";
 import { serveStatic } from "@hono/node-server/serve-static";
 import { DatabaseSync } from "node:sqlite";
-import { readFileSync, existsSync, mkdirSync } from "node:fs";
+import { readFileSync, existsSync, mkdirSync, rmSync, appendFileSync } from "node:fs";
+import { AsyncLocalStorage } from "node:async_hooks";
 import path from "node:path";
 import os from "node:os";
 
@@ -19,11 +20,18 @@ function loadEnv() {
 }
 loadEnv();
 
-// ---------- 数据库 ----------
+// ---------- 数据库：每个口令一个独立 SQLite 文件（结构性隔离，杜绝串数据） ----------
 mkdirSync("data", { recursive: true });
-const db = new DatabaseSync(path.join(process.cwd(), "data", "fitlog.db"));
-db.exec("PRAGMA journal_mode=WAL;");
-db.exec(`
+mkdirSync(path.join("data", "users"), { recursive: true });
+const DATA = path.join(process.cwd(), "data");
+const seed = JSON.parse(readFileSync(path.join(process.cwd(), "foods.json"), "utf8"));
+
+function openUserDb(p) {
+  mkdirSync(path.dirname(p), { recursive: true });
+  const d = new DatabaseSync(p);
+  d.exec("PRAGMA journal_mode=WAL;");
+  d.exec("PRAGMA busy_timeout=3000;"); // 瞬时文件锁（如 OneDrive 同步占用）等待而非报错
+  d.exec(`
 CREATE TABLE IF NOT EXISTS foods (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   name TEXT NOT NULL,
@@ -86,30 +94,66 @@ CREATE TABLE IF NOT EXISTS water (
   ml INTEGER DEFAULT 0
 );
 `);
-// 迁移：为存量库补充 膳食纤维/糖/Nutri-Score 字段
-const foodCols = db.prepare("PRAGMA table_info(foods)").all().map((c) => c.name);
-if (!foodCols.includes("fiber")) db.exec("ALTER TABLE foods ADD COLUMN fiber REAL");
-if (!foodCols.includes("sugar")) db.exec("ALTER TABLE foods ADD COLUMN sugar REAL");
-if (!foodCols.includes("off_grade")) db.exec("ALTER TABLE foods ADD COLUMN off_grade TEXT");
-
-const seed = JSON.parse(readFileSync(path.join(process.cwd(), "foods.json"), "utf8"));
-if (!db.prepare("SELECT COUNT(*) AS c FROM foods").get().c) {
-  const ins = db.prepare(
-    "INSERT INTO foods (name, category, per100, protein, carb, fat, aliases, fiber, sugar) VALUES (?,?,?,?,?,?,?,?,?)"
-  );
-  for (const [name, cat, per100, protein, carb, fat, fiber, sugar, aliases] of seed)
-    ins.run(name, cat, per100, protein, carb, fat, aliases, fiber, sugar);
-  console.log(`食物库已导入 ${seed.length} 条`);
-} else {
-  // 按《中国食物成分表》刷新种子数据（含新增纤维/糖维度），自定义食物不受影响
-  const upd = db.prepare(
-    "UPDATE foods SET category=?, per100=?, protein=?, carb=?, fat=?, aliases=?, fiber=?, sugar=? WHERE name=? AND source='cfct'"
-  );
-  let n = 0;
-  for (const [name, cat, per100, protein, carb, fat, fiber, sugar, aliases] of seed)
-    n += upd.run(cat, per100, protein, carb, fat, aliases, fiber, sugar, name).changes;
-  console.log(`食物库已刷新 ${n} 条种子数据`);
+  // 迁移：为存量库补充 膳食纤维/糖/Nutri-Score 字段
+  const foodCols = d.prepare("PRAGMA table_info(foods)").all().map((c) => c.name);
+  if (!foodCols.includes("fiber")) d.exec("ALTER TABLE foods ADD COLUMN fiber REAL");
+  if (!foodCols.includes("sugar")) d.exec("ALTER TABLE foods ADD COLUMN sugar REAL");
+  if (!foodCols.includes("off_grade")) d.exec("ALTER TABLE foods ADD COLUMN off_grade TEXT");
+  if (!d.prepare("SELECT COUNT(*) AS c FROM foods").get().c) {
+    const ins = d.prepare(
+      "INSERT INTO foods (name, category, per100, protein, carb, fat, aliases, fiber, sugar) VALUES (?,?,?,?,?,?,?,?,?)"
+    );
+    for (const [name, cat, per100, protein, carb, fat, fiber, sugar, aliases] of seed)
+      ins.run(name, cat, per100, protein, carb, fat, aliases, fiber, sugar);
+    console.log(`食物库已导入 ${seed.length} 条`);
+  } else {
+    // 按《中国食物成分表》刷新种子数据（含新增纤维/糖维度），自定义食物不受影响
+    const upd = d.prepare(
+      "UPDATE foods SET category=?, per100=?, protein=?, carb=?, fat=?, aliases=?, fiber=?, sugar=? WHERE name=? AND source='cfct'"
+    );
+    let n = 0;
+    for (const [name, cat, per100, protein, carb, fat, fiber, sugar, aliases] of seed)
+      n += upd.run(cat, per100, protein, carb, fat, aliases, fiber, sugar, name).changes;
+    console.log(`食物库已刷新 ${n} 条种子数据`);
+  }
+  return d;
 }
+
+const mainDb = openUserDb(path.join(DATA, "fitlog.db"));
+
+// 用户表：口令 → 独立数据库文件；首个用户为管理员（沿用 .env 的 ACCESS_PIN）
+mainDb.exec(`
+CREATE TABLE IF NOT EXISTS users (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  pin TEXT UNIQUE NOT NULL,
+  name TEXT NOT NULL,
+  dbfile TEXT NOT NULL,
+  is_admin INTEGER DEFAULT 0,
+  created_at TEXT DEFAULT (datetime('now','localtime'))
+);
+`);
+const PIN = (process.env.ACCESS_PIN || "").trim();
+if (!mainDb.prepare("SELECT COUNT(*) AS c FROM users").get().c)
+  mainDb.prepare("INSERT INTO users (pin, name, dbfile, is_admin) VALUES (?,?,?,1)").run(PIN || "888888", "主人", "fitlog.db");
+else if (PIN) mainDb.prepare("UPDATE users SET pin=? WHERE is_admin=1 AND pin<>?").run(PIN, PIN);
+
+// 请求级数据库路由：AsyncLocalStorage 把当前口令对应的库句柄注入 db 代理，
+// 下方所有 db.prepare(...) 调用自动落到该用户自己的独立数据库上。
+const als = new AsyncLocalStorage();
+const dbHandles = new Map();
+function dbFor(dbfile) {
+  const p = path.join(DATA, dbfile);
+  if (!dbHandles.has(p)) dbHandles.set(p, openUserDb(p));
+  return dbHandles.get(p);
+}
+const db = new Proxy({}, {
+  get(_, prop) {
+    const s = als.getStore();
+    const real = s ? s.db : mainDb;
+    const v = real[prop];
+    return typeof v === "function" ? v.bind(real) : v;
+  },
+});
 
 // ---------- 工具 ----------
 const r1 = (x) => Math.round(Number(x || 0) * 10) / 10;
@@ -118,12 +162,19 @@ const normalize = (s) =>
     .toLowerCase()
     .replace(/[\s,，。、·（）()\[\]【】_'"“”?!！？:：\-—]/g, "");
 
-let foodCache = null;
+// 食物缓存按用户隔离：挂在请求上下文上
 function getFoods() {
-  if (!foodCache) foodCache = db.prepare("SELECT * FROM foods").all().map((f) => ({ ...f, norm: normalize(f.name) }));
-  return foodCache;
+  const s = als.getStore();
+  const real = s ? s.db : mainDb;
+  const rows = () => real.prepare("SELECT * FROM foods").all().map((f) => ({ ...f, norm: normalize(f.name) }));
+  if (!s) return rows();
+  if (!s.foodCache) s.foodCache = rows();
+  return s.foodCache;
 }
-const invalidateFoods = () => (foodCache = null);
+const invalidateFoods = () => {
+  const s = als.getStore();
+  if (s) s.foodCache = null;
+};
 
 // 名称模糊匹配：精确 > 名称包含 > 别名匹配
 function matchFood(name) {
@@ -215,11 +266,61 @@ function extractJsonObject(text) {
 // ---------- 路由 ----------
 const app = new Hono();
 
-// 访问口令保护：.env 里配置 ACCESS_PIN 后，所有 /api 请求必须携带 x-pin 头
-const PIN = (process.env.ACCESS_PIN || "").trim();
+// 访问口令 → 用户路由：每个口令进入各自的独立数据库；无效口令一律 401
+const usersCache = new Map();
+function findUser(pin) {
+  if (!usersCache.has(pin)) usersCache.set(pin, mainDb.prepare("SELECT * FROM users WHERE pin = ?").get(pin) || null);
+  return usersCache.get(pin);
+}
 app.use("/api/*", async (c, next) => {
-  if (PIN && c.req.header("x-pin") !== PIN) return c.json({ error: "需要访问口令" }, 401);
-  await next();
+  const u = findUser((c.req.header("x-pin") || "").trim());
+  if (!u) {
+    await new Promise((r) => setTimeout(r, 150)); // 轻微防爆破
+    return c.json({ error: "需要访问口令" }, 401);
+  }
+  const store = { user: u, db: dbFor(u.dbfile), foodCache: null };
+  return als.run(store, () => next());
+});
+
+// ---- 当前用户信息 ----
+app.get("/api/me", (c) => {
+  const u = als.getStore().user;
+  return c.json({ name: u.name, is_admin: !!u.is_admin });
+});
+
+// ---- 多用户管理（仅管理员） ----
+app.get("/api/users", (c) => {
+  if (!als.getStore()?.user?.is_admin) return c.json({ error: "仅管理员可操作" }, 403);
+  const users = mainDb.prepare("SELECT id, pin, name, is_admin, created_at FROM users ORDER BY is_admin DESC, id").all();
+  return c.json({ users });
+});
+
+app.post("/api/users", async (c) => {
+  if (!als.getStore()?.user?.is_admin) return c.json({ error: "仅管理员可操作" }, 403);
+  const { name } = await c.req.json();
+  if (!name || !String(name).trim()) return c.json({ error: "请填写成员名称" }, 400);
+  let pin = "";
+  do { pin = String(Math.floor(100000 + Math.random() * 900000)); }
+  while (mainDb.prepare("SELECT 1 FROM users WHERE pin = ?").get(pin));
+  const dbfile = path.join("users", "u" + Date.now().toString(36) + Math.floor(Math.random() * 1000) + ".db");
+  dbFor(dbfile); // 立即创建并初始化该成员的独立数据库
+  const r = mainDb.prepare("INSERT INTO users (pin, name, dbfile, is_admin) VALUES (?,?,?,0)").run(pin, String(name).trim(), dbfile);
+  usersCache.clear();
+  return c.json({ id: Number(r.lastInsertRowid), pin, name: String(name).trim() });
+});
+
+app.delete("/api/users/:id", (c) => {
+  if (!als.getStore()?.user?.is_admin) return c.json({ error: "仅管理员可操作" }, 403);
+  const u = mainDb.prepare("SELECT * FROM users WHERE id = ?").get(Number(c.req.param("id")));
+  if (!u) return c.json({ error: "成员不存在" }, 404);
+  if (u.is_admin) return c.json({ error: "不能删除管理员账号" }, 400);
+  mainDb.prepare("DELETE FROM users WHERE id = ?").run(u.id);
+  usersCache.delete(u.pin);
+  const p = path.join(DATA, u.dbfile);
+  const d = dbHandles.get(p);
+  if (d) { try { d.close(); } catch {} dbHandles.delete(p); }
+  try { rmSync(p, { force: true }); } catch {}
+  return c.json({ ok: true });
 });
 
 app.get("/api/health", (c) => c.json({ ok: true, model: process.env.ZHIPU_MODEL || "glm-4v-flash" }));
@@ -557,6 +658,15 @@ app.get("*", serveStatic({ root: "./dist", rewriteRequestPath: () => "/index.htm
 
 // ---------- 启动 ----------
 const port = Number(process.env.PORT) || 8787;
+// 容错兜底：项目在 OneDrive 同步目录内，瞬时文件锁可能抛 I/O 异常；记录并继续服务，不让进程退出
+for (const evt of ["uncaughtException", "unhandledRejection"]) {
+  process.on(evt, (err) => {
+    const msg = `[${new Date().toLocaleString()}] ${evt}: ${err?.stack || err}\n`;
+    try { appendFileSync(path.join(DATA, "server-error.log"), msg, "utf8"); } catch {}
+    console.error(msg);
+  });
+}
+
 serve({ fetch: app.fetch, port, hostname: "0.0.0.0" }, () => {
   console.log(`轻食记服务已启动: http://localhost:${port}`);
   const isVirtual = (name) => /zero.?tier|vmware|vmnet|virtualbox|vethernet|wsl|hyper-v|loopback|bluetooth/i.test(name);

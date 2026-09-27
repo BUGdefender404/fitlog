@@ -3,3 +3,9 @@ dist/
 data/
 .env
 *.log
+# 安卓构建：工具链/密钥/产物都不入库（密钥泄露 = 任何人可伪造你的安装包更新）
+tools/android-sdk/
+android/build/
+android/keystore/
+轻食记.apk
+C:/Users/Public/qingshiji-build/

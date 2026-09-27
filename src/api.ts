@@ -284,6 +284,10 @@ export class ServerStore implements Store {
     return r.items;
   }
   parseLabel(imageDataUrl: string) { return this.http<{ name: string | null; serving_g: number | null; per100: Per100 }>("/api/parse-label", { method: "POST", body: JSON.stringify({ image: imageDataUrl }) }); }
+  getMe() { return this.http<{ name: string; is_admin: boolean }>("/api/me"); }
+  getUsers() { return this.http<{ users: { id: number; pin: string; name: string; is_admin: number; created_at: string }[] }>("/api/users"); }
+  addUser(name: string) { return this.http<{ id: number; pin: string; name: string }>("/api/users", { method: "POST", body: JSON.stringify({ name }) }); }
+  deleteUser(id: number) { return this.http<{ ok: boolean }>(`/api/users/${id}`, { method: "DELETE" }); }
 }
 
 // ---------- 本地模式（IndexedDB，部署在 GitHub Pages 时使用） ----------

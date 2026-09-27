@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState } from "react";
-import { envInfo, Store, Targets, fmtDate, getApiKey, setApiKey } from "../api";
+import { envInfo, ServerStore, Store, Targets, fmtDate, getApiKey, setApiKey } from "../api";
+
+type Member = { id: number; pin: string; name: string; is_admin: number; created_at: string };
 
 export default function MePage(props: {
   store: Store; targets: Targets | null; version: number;
@@ -14,6 +16,11 @@ export default function MePage(props: {
   const [keyInput, setKeyInput] = useState(getApiKey());
   const [keySaved, setKeySaved] = useState(!!getApiKey());
   const importRef = useRef<HTMLInputElement>(null);
+  const [me, setMe] = useState<{ name: string; is_admin: boolean } | null>(null);
+  const [members, setMembers] = useState<Member[]>([]);
+  const [newName, setNewName] = useState("");
+  const isServer = store.kind === "server";
+  const loadMembers = () => (store as ServerStore).getUsers().then((r) => setMembers(r.users)).catch(() => {});
 
   useEffect(() => {
     (async () => {
@@ -30,8 +37,26 @@ export default function MePage(props: {
       } catch (e: any) { if (e?.name !== "AuthError") notify(e.message || ""); }
       finally { setLoaded(true); }
     })();
+    if (isServer) (store as ServerStore).getMe().then(setMe).catch(() => {});
+    if (isServer) loadMembers();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [store]);
+
+  const addMember = async () => {
+    if (!newName.trim()) return notify("请填写成员名称");
+    try {
+      const r = await (store as ServerStore).addUser(newName.trim());
+      setNewName("");
+      await loadMembers();
+      notify(`已创建「${r.name}」，口令 ${r.pin}`);
+    } catch (e: any) { notify(e.message || "创建失败"); }
+  };
+  const delMember = async (u: Member) => {
+    if (!confirm(`删除「${u.name}」？该成员的全部记录将一并删除，不可恢复。`)) return;
+    try { await (store as ServerStore).deleteUser(u.id); await loadMembers(); notify("已删除"); }
+    catch (e: any) { notify(e.message || "删除失败"); }
+  };
+  const switchPin = () => { localStorage.removeItem("fitlog_pin"); location.reload(); };
 
   if (!loaded) return <div className="page" />;
   const set = (k: string, v: any) => setF((o) => ({ ...o, [k]: v }));
@@ -185,6 +210,35 @@ export default function MePage(props: {
         })()}
       </section>
 
+      {store.kind === "server" && (
+        <section className="card">
+          <h2>多用户 / 家庭成员</h2>
+          <p className="cf-note">当前身份：{me ? me.name : "…"}。每人一个 6 位口令，凭口令进入后只能看到自己的数据，互不相通。</p>
+          {me?.is_admin && (
+            <>
+              <div className="ex-list">
+                {members.map((u) => (
+                  <div className="ex-row" key={u.id}>
+                    <span className="fn">
+                      {u.name}
+                      {!!u.is_admin && <span className="logged-badge">管理员</span>}
+                      <i>口令 {u.pin}</i>
+                    </span>
+                    {!u.is_admin && <button className="del" onClick={() => delMember(u)}>×</button>}
+                  </div>
+                ))}
+              </div>
+              <div className="weight-row">
+                <input placeholder="成员名称，如：妈妈" value={newName} onChange={(e) => setNewName(e.target.value)} />
+                <button className="primary small" onClick={addMember}>添加成员</button>
+              </div>
+              <p className="cf-note">把口令告诉成员：TA 用手机或电脑浏览器打开本页，输入口令即进入自己的独立空间。删除成员会连同其全部记录一起删除。</p>
+            </>
+          )}
+          <button className="ghost-line" style={{ marginTop: 10 }} onClick={switchPin}>🔄 切换口令（退出当前用户）</button>
+        </section>
+      )}
+
       <section className="card">
         <h2>今日体重</h2>
         <div className="weight-row">
@@ -223,7 +277,7 @@ export default function MePage(props: {
 
       <section className="card about">
         <h2>关于</h2>
-        <p>轻食记 v1.2 · 食物营养数据参考《中国食物成分表》及中国营养学会营养健康查询平台（nlc.chinanutri.cn）、NutriData 营养数据库（nutridata.cn）；包装食品条码数据来自 Open Food Facts 全球开源食物库（world.openfoodfacts.org，ODbL 开放协议，Nutri-Score 分级映射红黄绿灯）。红黄绿分级按能量密度、蛋白质、膳食纤维、脂肪、糖综合判定。AI 识别由智谱 GLM-4V-Flash（免费档）提供，估算值仅供参考。</p>
+        <p>轻食记 v1.3 · 食物营养数据参考《中国食物成分表》及中国营养学会营养健康查询平台（nlc.chinanutri.cn）、NutriData 营养数据库（nutridata.cn）；包装食品条码数据来自 Open Food Facts 全球开源食物库（world.openfoodfacts.org，ODbL 开放协议，Nutri-Score 分级映射红黄绿灯）。红黄绿分级按能量密度、蛋白质、膳食纤维、脂肪、糖综合判定。AI 识别由智谱 GLM-4V-Flash（免费档）提供，估算值仅供参考。</p>
       </section>
     </div>
   );
